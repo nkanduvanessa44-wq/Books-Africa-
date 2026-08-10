@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { collection, query, where, onSnapshot, deleteDoc, doc } from 'firebase/firestore';
-import { ArrowLeft, Book as BookIcon, Download, Star, Trash2, Eye, Plus, LayoutDashboard, BarChart3, Users, X, FileText, LogOut, MoreVertical, Library, User as UserIcon, TrendingUp, CheckCircle, AlertCircle, PenTool, Edit } from 'lucide-react';
+import { collection, query, where, onSnapshot, deleteDoc, doc, getDoc, updateDoc } from 'firebase/firestore';
+import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
+import { updateProfile } from 'firebase/auth';
+import { ArrowLeft, Book as BookIcon, Download, Star, Trash2, Eye, Plus, LayoutDashboard, BarChart3, Users, X, FileText, LogOut, MoreVertical, Library, User as UserIcon, TrendingUp, CheckCircle, AlertCircle, PenTool, Edit, Camera, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { auth, db, getCurrentUser } from '../lib/firebase';
+import { toast } from 'sonner';
+import { auth, db, storage, getCurrentUser } from '../lib/firebase';
 import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
@@ -26,6 +29,8 @@ interface WriterBook {
 export default function WriterDashboard() {
   const [books, setBooks] = useState<WriterBook[]>([]);
   const [loading, setLoading] = useState(true);
+  const [writerInfo, setWriterInfo] = useState<any>(null);
+  const [photoUploading, setPhotoUploading] = useState(false);
   const [activeTab, setActiveTab] = useState<'published' | 'scripts' | 'drafts'>('published');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const navigate = useNavigate();
@@ -39,12 +44,20 @@ export default function WriterDashboard() {
     const currentUser = getCurrentUser();
     if (!currentUser) return;
 
+    // Fetch writer user doc
+    const userDocRef = doc(db, 'users', currentUser.uid);
+    const unsubscribeUser = onSnapshot(userDocRef, (docSnap) => {
+      if (docSnap.exists()) {
+        setWriterInfo(docSnap.data());
+      }
+    });
+
     const q = query(
       collection(db, 'books'),
       where('writerId', '==', currentUser.uid)
     );
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    const unsubscribeBooks = onSnapshot(q, (snapshot) => {
       const booksData = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
@@ -57,8 +70,75 @@ export default function WriterDashboard() {
       setLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribeUser();
+      unsubscribeBooks();
+    };
   }, []);
+
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please select an image file (JPEG, PNG, WEBP).');
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Author photo must be smaller than 5 MB.');
+      return;
+    }
+
+    const currentUser = getCurrentUser();
+    if (!currentUser) return;
+
+    setPhotoUploading(true);
+    toast.info('Uploading author portrait...');
+
+    try {
+      const photoRef = ref(storage, `avatars/${currentUser.uid}-${Date.now()}`);
+      const uploadTask = uploadBytesResumable(photoRef, file, { contentType: file.type });
+
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          uploadTask.cancel();
+          reject(new Error('Photo upload timed out. Please try a smaller image.'));
+        }, 45000);
+
+        uploadTask.on(
+          'state_changed',
+          null,
+          (err) => {
+            clearTimeout(timeout);
+            reject(err);
+          },
+          () => {
+            clearTimeout(timeout);
+            resolve();
+          }
+        );
+      });
+
+      const downloadUrl = await getDownloadURL(photoRef);
+
+      await updateDoc(doc(db, 'users', currentUser.uid), {
+        photoUrl: downloadUrl,
+        updatedAt: new Date().toISOString()
+      });
+
+      if (auth.currentUser) {
+        await updateProfile(auth.currentUser, { photoURL: downloadUrl });
+      }
+
+      toast.success('Author portrait updated successfully!');
+    } catch (err: any) {
+      console.error('Author photo upload failed:', err);
+      toast.error('Failed to update author photo: ' + (err.message || 'Network error'));
+    } finally {
+      setPhotoUploading(false);
+    }
+  };
 
   const filteredBooks = books.filter(book => {
     if (activeTab === 'drafts') return book.status === 'draft';
@@ -232,9 +312,79 @@ export default function WriterDashboard() {
           </div>
         </header>
 
-        <main className="max-w-5xl mx-auto p-8 pt-12 w-full">
+        <main className="max-w-5xl mx-auto p-8 pt-12 w-full space-y-8">
+          {/* Author Profile Card */}
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-white rounded-[36px] p-6 sm:p-8 shadow-xl shadow-primary/5 border border-primary/5 flex flex-col sm:flex-row items-center justify-between gap-6"
+          >
+            <div className="flex flex-col sm:flex-row items-center gap-6 text-center sm:text-left">
+              {/* Photo Container */}
+              <div className="relative group">
+                <div className="w-24 h-24 rounded-[28px] overflow-hidden bg-primary/10 border-2 border-primary/20 flex items-center justify-center shadow-md relative">
+                  {writerInfo?.photoUrl || auth.currentUser?.photoURL ? (
+                    <img 
+                      src={writerInfo?.photoUrl || auth.currentUser?.photoURL || ''} 
+                      alt="Author Portrait" 
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <UserIcon className="w-10 h-10 text-primary/60" />
+                  )}
+                  {photoUploading && (
+                    <div className="absolute inset-0 bg-primary/60 backdrop-blur-xs flex items-center justify-center">
+                      <Loader2 className="w-8 h-8 text-white animate-spin" />
+                    </div>
+                  )}
+                </div>
+
+                <label 
+                  htmlFor="writer-photo-upload"
+                  className="absolute -bottom-2 -right-2 w-9 h-9 bg-primary text-white rounded-xl flex items-center justify-center shadow-lg cursor-pointer hover:scale-110 active:scale-95 transition-all border-2 border-white"
+                  title="Upload Author Portrait"
+                >
+                  <Camera className="w-4 h-4" />
+                  <input 
+                    id="writer-photo-upload" 
+                    type="file" 
+                    accept="image/*" 
+                    className="hidden" 
+                    onChange={handlePhotoUpload}
+                    disabled={photoUploading}
+                  />
+                </label>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-center sm:justify-start gap-2">
+                  <h2 className="text-xl sm:text-2xl font-serif font-black text-natural-text">
+                    {writerInfo?.penName || writerInfo?.name || auth.currentUser?.displayName || 'Author'}
+                  </h2>
+                  <span className="px-2.5 py-0.5 bg-primary/10 text-primary text-[9px] font-black uppercase tracking-wider rounded-full border border-primary/15">
+                    Author Guild
+                  </span>
+                </div>
+                <p className="text-xs font-bold text-accent mt-1">
+                  {writerInfo?.bio ? writerInfo.bio : 'Share your literary journey with readers globally.'}
+                </p>
+                <p className="text-[10px] text-gray-400 mt-2">
+                  Click camera icon to update your public author portrait
+                </p>
+              </div>
+            </div>
+
+            <button 
+              onClick={() => navigate('/profile')}
+              className="px-5 py-3 bg-natural-bg hover:bg-primary/5 text-primary rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all border border-primary/10 flex items-center gap-2 shrink-0"
+            >
+              <PenTool className="w-3.5 h-3.5" />
+              Edit Bio & Info
+            </button>
+          </motion.div>
+
           {/* Stats Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <motion.div 
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
