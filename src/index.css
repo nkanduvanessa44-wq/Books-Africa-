@@ -1,0 +1,56 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Playfair Display", ui-serif, Georgia, serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  
+  --color-primary: #1e3a8a;
+  --color-primary-dark: #1e293b;
+  --color-accent: #64748b;
+  --color-natural-bg: #eff6ff;
+  --color-sidebar-bg: #1e293b;
+  --color-natural-text: #1e293b;
+}
+
+::selection {
+  background-color: #fde047;
+  color: #1e293b;
+}
+
+@layer utilities {
+  .scrollbar-none {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+  .mask-fade-right {
+    mask-image: linear-gradient(to right, black 85%, transparent 100%);
+  }
+  .customize-scrollbar::-webkit-scrollbar {
+    width: 6px;
+  }
+  .customize-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .customize-scrollbar::-webkit-scrollbar-thumb {
+    background: #e2e8f0;
+    border-radius: 10px;
+  }
+  .natural-card {
+    @apply bg-white rounded-[40px] border border-primary/5 transition-all duration-500;
+  }
+}
+
+@layer base {
+  body {
+    @apply font-sans bg-gray-50 text-gray-900;
+  }
+}
+
+.android-shadow {
+  box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}

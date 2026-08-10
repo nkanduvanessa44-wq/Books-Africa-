@@ -1,0 +1,111 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "Details for customers and writers",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "name": { "type": "string" },
+        "username": { "type": "string" },
+        "penName": { "type": "string" },
+        "bio": { "type": "string", "description": "Short biography for authors or readers" },
+        "photoUrl": { "type": "string" },
+        "role": { "type": "string", "enum": ["customer", "writer", "admin"] },
+        "hasAppliedAsWriter": { "type": "boolean" },
+        "writerRegisteredAt": { "type": "string", "format": "date-time" },
+        "categories": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "name", "role", "createdAt"]
+    },
+    "Book": {
+      "title": "Book",
+      "description": "Metadata for uploaded books",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "author": { "type": "string" },
+        "description": { "type": "string" },
+        "price": { "type": "string" },
+        "coverUrl": { "type": "string" },
+        "pdfUrl": { "type": "string" },
+        "writerId": { "type": "string" },
+        "ratingAverage": { "type": "number" },
+        "ratingCount": { "type": "number" },
+        "downloadCount": { "type": "number" },
+        "category": { "type": "string" },
+        "status": { "type": "string", "enum": ["draft", "published"] },
+        "isScript": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "title", "author", "price", "writerId", "category", "downloadCount"]
+    },
+    "Rating": {
+      "title": "Rating",
+      "description": "User rating for a book",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "rating": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "rating", "createdAt"]
+    },
+    "Comment": {
+      "title": "Comment",
+      "description": "User comment for a book",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "text": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "userName", "text", "createdAt"]
+    },
+    "ReadingProgress": {
+      "title": "Reading Progress",
+      "description": "Last read page and percentage progress for a book",
+      "type": "object",
+      "properties": {
+        "bookId": { "type": "string" },
+        "currentPage": { "type": "number" },
+        "totalPages": { "type": "number" },
+        "percentage": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["bookId", "currentPage", "totalPages", "percentage", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "users": {
+      "schema": "UserProfile",
+      "description": "Collection of user profiles"
+    },
+    "users/{userId}/readingProgress/{bookId}": {
+      "schema": "ReadingProgress",
+      "description": "User reading progress for books"
+    },
+    "books": {
+      "schema": "Book",
+      "description": "Collection of all books uploaded by writers"
+    },
+    "scripts": {
+      "schema": "Book",
+      "description": "Collection of scripts or drafts"
+    },
+    "books/{bookId}/ratings": {
+      "schema": "Rating",
+      "description": "Ratings for a specific book"
+    },
+    "books/{bookId}/comments": {
+      "schema": "Comment",
+      "description": "Comments for a specific book"
+    }
+  }
+}

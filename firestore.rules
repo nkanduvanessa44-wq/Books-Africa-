@@ -1,0 +1,209 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global safety net: default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() { return request.auth != null; }
+    function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
+    
+    function isVerified() { 
+      return isSignedIn() && (
+        request.auth.token.email_verified == true || 
+        request.auth.token.firebase.sign_in_provider == 'google.com' ||
+        request.auth.token.firebase.sign_in_provider == 'password'
+      ); 
+    }
+    
+    function isAdmin() { 
+      return isSignedIn() && (
+        request.auth.token.email == 'nkanduvanessa44@gmail.com' ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
+      );
+    }
+    
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    
+    function isValidId(id) { 
+      return id is string && id.size() <= 128; 
+    }
+
+    // --- User Profile Schemas ---
+    // Create Validation: requires all mandatory fields, ensures type safety
+    function isValidUserProfileCreate(data) {
+      return data.keys().hasAll(['uid', 'name', 'role', 'createdAt']) &&
+             data.uid == request.auth.uid &&
+             data.name is string &&
+             data.createdAt is string &&
+             (data.role == 'customer' || data.role == 'writer' || (data.role == 'admin' && request.auth.token.email == 'nkanduvanessa44@gmail.com')) &&
+             (!data.keys().contains('email') || data.email is string) &&
+             (!data.keys().contains('penName') || data.penName == null || data.penName is string) &&
+             (!data.keys().contains('bio') || data.bio == null || data.bio is string) &&
+             (!data.keys().contains('photoUrl') || data.photoUrl == null || data.photoUrl is string) &&
+             (!data.keys().contains('categories') || data.categories is list) &&
+             (!data.keys().contains('hasAppliedAsWriter') || data.hasAppliedAsWriter is bool);
+    }
+
+    // Update Validation: validates whatever keys are present for partial/full updates
+    function isValidUserProfileUpdate(data) {
+      return (!data.keys().contains('uid') || data.uid == request.auth.uid) &&
+             (!data.keys().contains('email') || data.email is string) &&
+             (!data.keys().contains('name') || data.name is string) &&
+             (!data.keys().contains('role') || data.role in ['customer', 'writer', 'admin']) &&
+             (!data.keys().contains('createdAt') || data.createdAt is string) &&
+             (!data.keys().contains('penName') || data.penName == null || data.penName is string) &&
+             (!data.keys().contains('bio') || data.bio == null || data.bio is string) &&
+             (!data.keys().contains('photoUrl') || data.photoUrl == null || data.photoUrl is string) &&
+             (!data.keys().contains('categories') || data.categories is list) &&
+             (!data.keys().contains('hasAppliedAsWriter') || data.hasAppliedAsWriter is bool) &&
+             (!data.keys().contains('updatedAt') || data.updatedAt is string);
+    }
+
+    // --- Book Schemas ---
+    // Create Validation
+    function isValidBookCreate(data) {
+      return data.keys().hasAll(['title', 'author', 'category', 'price', 'downloadCount', 'createdAt', 'writerId']) &&
+             data.title is string &&
+             data.author is string &&
+             data.category is string &&
+             data.price is string &&
+             data.downloadCount is number &&
+             data.createdAt is string &&
+             data.writerId == request.auth.uid &&
+             (!data.keys().contains('description') || data.description == null || data.description is string) &&
+             (!data.keys().contains('coverUrl') || data.coverUrl == null || data.coverUrl is string) &&
+             (!data.keys().contains('pdfUrl') || data.pdfUrl == null || data.pdfUrl is string) &&
+             (!data.keys().contains('ratingAverage') || data.ratingAverage is number) &&
+             (!data.keys().contains('ratingCount') || data.ratingCount is number) &&
+             (!data.keys().contains('isApproved') || data.isApproved is bool) &&
+             (!data.keys().contains('ageRating') || data.ageRating is string) &&
+             (!data.keys().contains('status') || data.status in ['draft', 'published']) &&
+             (!data.keys().contains('isScript') || data.isScript is bool);
+    }
+
+    // Update Validation
+    function isValidBookUpdate(data) {
+      return (!data.keys().contains('title') || data.title is string) &&
+             (!data.keys().contains('author') || data.author is string) &&
+             (!data.keys().contains('category') || data.category is string) &&
+             (!data.keys().contains('price') || data.price is string) &&
+             (!data.keys().contains('downloadCount') || data.downloadCount is number) &&
+             (!data.keys().contains('createdAt') || data.createdAt is string) &&
+             (!data.keys().contains('description') || data.description == null || data.description is string) &&
+             (!data.keys().contains('coverUrl') || data.coverUrl == null || data.coverUrl is string) &&
+             (!data.keys().contains('pdfUrl') || data.pdfUrl == null || data.pdfUrl is string) &&
+             (!data.keys().contains('ratingAverage') || data.ratingAverage is number) &&
+             (!data.keys().contains('ratingCount') || data.ratingCount is number) &&
+             (!data.keys().contains('isApproved') || data.isApproved is bool) &&
+             (!data.keys().contains('ageRating') || data.ageRating is string) &&
+             (!data.keys().contains('status') || data.status in ['draft', 'published']) &&
+             (!data.keys().contains('isScript') || data.isScript is bool) &&
+             (!data.keys().contains('updatedAt') || data.updatedAt is string);
+    }
+
+    // --- Rating Validation ---
+    function isValidRating(data) {
+      return (!data.keys().contains('userId') || data.userId == request.auth.uid) &&
+             (!data.keys().contains('rating') || (data.rating is number && data.rating >= 1 && data.rating <= 5)) &&
+             (!data.keys().contains('createdAt') || data.createdAt is string);
+    }
+
+    // --- Comment Validation ---
+    function isValidComment(data) {
+      return (!data.keys().contains('userId') || data.userId == request.auth.uid) &&
+             (!data.keys().contains('userName') || data.userName is string) &&
+             (!data.keys().contains('text') || data.text is string) &&
+             (!data.keys().contains('createdAt') || data.createdAt is string);
+    }
+
+    // === Match Blocks ===
+
+    match /users/{userId} {
+      // User can read their own profile, or if it is a writer profile (needed for reader UI), or if Admin
+      // Done safely using resource checking to prevent null parent crashes
+      allow get: if isSignedIn() && (isOwner(userId) || (resource != null && resource.data.get('role', 'customer') == 'writer') || isAdmin());
+      // Only admins can list entire users collection to prevent email scraping
+      allow list: if isAdmin(); 
+      
+      allow create: if isOwner(userId) && isValidUserProfileCreate(incoming());
+      
+      allow update: if (isOwner(userId) && isValidUserProfileUpdate(incoming()) && (
+        // Protect roles and immutable fields from standard users: block changes to immutable fields
+        (incoming().get('role', null) == null || incoming().role == existing().get('role', 'customer')) &&
+        (incoming().get('uid', null) == null || incoming().uid == existing().get('uid', userId)) &&
+        (incoming().get('createdAt', null) == null || incoming().createdAt == existing().get('createdAt', ''))
+      )) || isAdmin();
+      
+      allow delete: if isAdmin();
+
+      match /readingProgress/{bookId} {
+        allow get, list: if isOwner(userId);
+        allow create, update: if isOwner(userId) && isValidId(bookId) &&
+          (!incoming().keys().contains('currentPage') || incoming().currentPage is number) &&
+          (!incoming().keys().contains('totalPages') || incoming().totalPages is number) &&
+          (!incoming().keys().contains('percentage') || incoming().percentage is number) &&
+          (!incoming().keys().contains('updatedAt') || incoming().updatedAt is string);
+        allow delete: if isOwner(userId);
+      }
+    }
+
+    match /books/{bookId} {
+      allow get: if isValidId(bookId); 
+      allow list: if true;
+      
+      // Only validated users with a writer profile can create books
+      allow create: if isValidId(bookId) && isVerified() && isValidBookCreate(incoming()) && 
+                    incoming().writerId == request.auth.uid &&
+                    exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+                    get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'writer';
+      
+      allow update: if isValidId(bookId) && isSignedIn() && (
+        // Action 1: Writer edits their own manuscript metadata - cannot transfer status, change createdAt or change owner UIDs
+        (isVerified() && 
+         existing().writerId == request.auth.uid && 
+         isValidBookUpdate(incoming()) && 
+         (incoming().get('writerId', null) == null || incoming().writerId == existing().writerId) &&
+         (incoming().get('createdAt', null) == null || incoming().createdAt == existing().createdAt)) ||
+        // Action 2: Consumer updates analytics/ratings (partial update)
+        (incoming().diff(existing()).affectedKeys().hasOnly(['downloadCount', 'ratingAverage', 'ratingCount', 'updatedAt']) &&
+         (!incoming().keys().contains('downloadCount') || (incoming().downloadCount is number && incoming().downloadCount >= existing().get('downloadCount', 0))) &&
+         (!incoming().keys().contains('ratingAverage') || incoming().ratingAverage is number) &&
+         (!incoming().keys().contains('ratingCount') || incoming().ratingCount is number)) ||
+        // Action 3: Admin approves or modifies
+        isAdmin()
+      );
+      
+      allow delete: if isValidId(bookId) && ((isVerified() && existing().writerId == request.auth.uid) || isAdmin());
+
+      // Book Ratings subcollection
+      match /ratings/{userId} {
+        allow get: if isValidId(userId);
+        allow list: if true;
+        allow create: if isOwner(userId) && isValidId(userId) && incoming().get('userId', '') == request.auth.uid && isValidRating(incoming());
+        allow update: if isOwner(userId) && isValidId(userId) && isValidRating(incoming());
+        allow delete: if (isOwner(userId) && isValidId(userId)) || isAdmin();
+      }
+
+      // Book Comments subcollection
+      match /comments/{commentId} {
+        allow get: if isValidId(commentId);
+        allow list: if true;
+        allow create: if isValidId(commentId) && isVerified() && incoming().get('userId', '') == request.auth.uid && isValidComment(incoming());
+        allow update: if isValidId(commentId) && isOwner(existing().userId) && isValidComment(incoming()) && (incoming().get('userId', null) == null || incoming().userId == existing().userId) && (incoming().get('createdAt', null) == null || incoming().createdAt == existing().createdAt);
+        allow delete: if isValidId(commentId) && (isOwner(existing().userId) || isAdmin());
+      }
+    }
+
+    // --- Hard Copies ---
+    match /hardCopies/{copyId} {
+      allow get: if isValidId(copyId);
+      allow list: if true;
+      allow write: if isAdmin() && isValidId(copyId);
+    }
+  }
+}

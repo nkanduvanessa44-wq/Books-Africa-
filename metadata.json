@@ -1,0 +1,6 @@
+{
+  "name": "Books Africa",
+  "description": "A comprehensive book platform for readers and writers in Zambia, supporting book uploads, browsing, and downloads.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
