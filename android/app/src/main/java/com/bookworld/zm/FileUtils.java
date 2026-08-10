@@ -38,7 +38,14 @@ public class FileUtils {
             try {
                 URL url = new URL(params[0]);
                 HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+                connection.setConnectTimeout(15000);
+                connection.setReadTimeout(30000);
                 connection.connect();
+
+                int responseCode = connection.getResponseCode();
+                if (responseCode < 200 || responseCode >= 300) {
+                    throw new Exception("Server returned HTTP response code: " + responseCode);
+                }
 
                 InputStream input = connection.getInputStream();
                 File directory = new File(context.getFilesDir(), "downloaded_books");
@@ -49,14 +56,22 @@ public class FileUtils {
                 File file = new File(directory, fileName);
                 FileOutputStream output = new FileOutputStream(file);
 
-                byte[] data = new byte[4096];
+                byte[] data = new byte[8192];
                 int count;
+                long total = 0;
                 while ((count = input.read(data)) != -1) {
                     output.write(data, 0, count);
+                    total += count;
                 }
 
                 output.close();
                 input.close();
+
+                if (total == 0) {
+                    if (file.exists()) file.delete();
+                    throw new Exception("Downloaded file is empty (0 bytes)");
+                }
+
                 return file;
             } catch (Exception e) {
                 this.exception = e;

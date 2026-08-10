@@ -33,24 +33,16 @@ export default function App() {
       }
 
       if (currentUser) {
-        // If in Sandbox Mode, bypass Firestore query and use local role
-        const sandboxUserStr = localStorage.getItem('sandbox_user');
-        if (sandboxUserStr) {
-          try {
-            const parsed = JSON.parse(sandboxUserStr);
-            setUserRole(parsed.role);
-            setLoading(false);
-            return;
-          } catch (e) {}
-        }
-
         unsubscribeDoc = onSnapshot(doc(db, 'users', currentUser.uid), (snapshot) => {
           if (snapshot.exists()) {
-            setUserRole(snapshot.data().role);
+            setUserRole(snapshot.data().role || 'customer');
+          } else {
+            setUserRole('customer');
           }
           setLoading(false);
         }, (error) => {
           console.error("User document listen error:", error);
+          setUserRole('customer');
           setLoading(false);
         });
       } else {

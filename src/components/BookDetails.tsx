@@ -8,6 +8,7 @@ import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
 import { set, get } from 'idb-keyval';
 import { encryptBlob, decryptToBlob } from '../lib/encryption';
 import { saveReadingProgress as persistProgress, fetchReadingProgress, ReadingProgress } from '../lib/progress';
+import { toast } from 'sonner';
 
 function base64ToBlob(base64Data: string, contentType: string = 'application/pdf') {
   const parts = base64Data.split(';base64,');
@@ -533,6 +534,10 @@ export default function BookDetails() {
     setDownloadProgress(0);
     try {
       let targetPdfUrl = book.pdfUrl;
+      if (!targetPdfUrl) {
+        throw new Error('No manuscript document URL available for this book.');
+      }
+
       const localRefIndex = targetPdfUrl.indexOf('#local_ref=');
       let pdfBlob: Blob;
       
@@ -547,7 +552,10 @@ export default function BookDetails() {
         setDownloadProgress(50);
       } else {
         const response = await fetch(targetPdfUrl);
-        if (!response.body) throw new Error('No response body');
+        if (!response.ok) {
+          throw new Error(`Network error (${response.status}): Failed to retrieve document.`);
+        }
+        if (!response.body) throw new Error('No response body returned from document server.');
         
         const contentLength = response.headers.get('Content-Length');
         const total = contentLength ? parseInt(contentLength, 10) : 0;
@@ -571,6 +579,10 @@ export default function BookDetails() {
         }
         pdfBlob = new Blob(chunks, { type: 'application/pdf' });
       }
+
+      if (pdfBlob.size === 0) {
+        throw new Error('Downloaded document content is empty.');
+      }
       
       const encryptedData = await encryptBlob(pdfBlob);
 
@@ -584,6 +596,7 @@ export default function BookDetails() {
 
       setIsDownloaded(true);
       setDownloadProgress(100);
+      toast.success('Manuscript stored securely for offline reading.');
 
       // Enqueue download interaction for sync
       const enqueueDownload = async () => {
@@ -611,9 +624,9 @@ export default function BookDetails() {
       }
       
       setBook(prev => prev ? { ...prev, downloadCount: (prev.downloadCount || 0) + 1 } : null);
-    } catch (error) {
-      console.error('Download failed:', error);
-      alert('Failed to download for offline reading.');
+    } catch (error: any) {
+      console.error('Offline download failed:', error);
+      toast.error('Offline storage failed: ' + (error.message || 'Network error'));
     } finally {
       setDownloading(false);
     }
@@ -624,6 +637,11 @@ export default function BookDetails() {
     try {
       setDownloading(true);
       let targetPdfUrl = book.pdfUrl;
+      if (!targetPdfUrl) {
+        toast.error('Document URL missing for this book.');
+        return;
+      }
+
       const localRefIndex = targetPdfUrl.indexOf('#local_ref=');
       let blob: Blob;
 
@@ -637,13 +655,20 @@ export default function BookDetails() {
       } else {
         try {
           const response = await fetch(targetPdfUrl);
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+          }
           blob = await response.blob();
-        } catch (fetchError) {
-          console.warn("Direct fetch failed due to CORS, opening link directly:", fetchError);
+          if (blob.size === 0) {
+            throw new Error('Retrieved PDF file was empty.');
+          }
+        } catch (fetchError: any) {
+          console.warn("Direct fetch failed, attempting browser download link:", fetchError);
+          const safeTitle = (book.title || 'manuscript').replace(/[^a-zA-Z0-9_-]/g, '_');
           const a = document.createElement('a');
           a.href = targetPdfUrl;
           a.target = '_blank';
-          a.download = `${book.title}.pdf`;
+          a.download = `${safeTitle}.pdf`;
           document.body.appendChild(a);
           a.click();
           document.body.removeChild(a);
@@ -652,14 +677,16 @@ export default function BookDetails() {
         }
       }
 
+      const safeTitle = (book.title || 'manuscript').replace(/[^a-zA-Z0-9_-]/g, '_');
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${book.title}.pdf`;
+      a.download = `${safeTitle}.pdf`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
+      toast.success('Manuscript PDF download started.');
       
       const enqueueDownload = async () => {
         const queue = await get('sync_queue') || [];
@@ -685,9 +712,9 @@ export default function BookDetails() {
         handleFirestoreError(upErr, OperationType.UPDATE, bookPath);
       }
       setBook(prev => prev ? { ...prev, downloadCount: (prev.downloadCount || 0) + 1 } : null);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Download error:', error);
-      alert('Could not download the PDF file.');
+      toast.error('Download failed: ' + (error.message || 'Check network connection'));
     } finally {
       setDownloading(false);
     }

@@ -85,39 +85,57 @@ public class UploadActivity extends AppCompatActivity {
     }
 
     private void uploadBook() {
+        if (mAuth.getCurrentUser() == null) {
+            Toast.makeText(this, "Authentication required. Please sign in.", Toast.LENGTH_LONG).show();
+            return;
+        }
+
         String title = titleEdit.getText().toString().trim();
         String author = authorEdit.getText().toString().trim();
         String price = priceEdit.getText().toString().trim();
         String desc = descEdit.getText().toString().trim();
 
         if (TextUtils.isEmpty(title) || TextUtils.isEmpty(author) || coverUri == null || pdfUri == null) {
-            Toast.makeText(this, "Missing fields or files", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Please fill in all required fields and select both cover image and manuscript PDF.", Toast.LENGTH_LONG).show();
             return;
         }
+
+        String uid = mAuth.getCurrentUser().getUid();
+        String safeUid = uid.replaceAll("[^a-zA-Z0-9]", "_");
+        long timestamp = System.currentTimeMillis();
+        String bookId = UUID.randomUUID().toString();
+
+        String manuscriptPathStr = "books/" + safeUid + "_" + timestamp + "_manuscript.pdf";
+        String coverPathStr = "covers/" + safeUid + "_" + timestamp + "_cover.jpg";
+
+        StorageReference coverPath = storageRef.child(coverPathStr);
+        StorageReference pdfPath = storageRef.child(manuscriptPathStr);
 
         progressBar.setVisibility(View.VISIBLE);
         uploadBtn.setEnabled(false);
 
-        String bookId = UUID.randomUUID().toString();
-        StorageReference coverPath = storageRef.child("covers/" + bookId + ".jpg");
-        StorageReference pdfPath = storageRef.child("books/" + bookId + ".pdf");
-
         coverPath.putFile(coverUri).addOnSuccessListener(taskSnapshot -> {
             coverPath.getDownloadUrl().addOnSuccessListener(coverUrl -> {
                 pdfPath.putFile(pdfUri).addOnSuccessListener(taskSnapshot2 -> {
+                    long pdfSize = taskSnapshot2.getTotalByteCount();
                     pdfPath.getDownloadUrl().addOnSuccessListener(pdfUrl -> {
-                        saveToFirestore(bookId, title, author, price, desc, coverUrl.toString(), pdfUrl.toString());
-                    });
-                });
-            });
-        }).addOnFailureListener(e -> {
-            progressBar.setVisibility(View.GONE);
-            uploadBtn.setEnabled(true);
-            Toast.makeText(UploadActivity.this, "Upload failed", Toast.LENGTH_SHORT).show();
-        });
+                        saveToFirestore(bookId, title, author, price, desc, coverUrl.toString(), pdfUrl.toString(), manuscriptPathStr, pdfSize, uid);
+                    }).addOnFailureListener(e -> handleUploadError("Failed to resolve PDF URL: " + e.getLocalizedMessage(), pdfPath));
+                }).addOnFailureListener(e -> handleUploadError("PDF upload failed: " + e.getLocalizedMessage(), null));
+            }).addOnFailureListener(e -> handleUploadError("Failed to resolve cover URL: " + e.getLocalizedMessage(), null));
+        }).addOnFailureListener(e -> handleUploadError("Cover image upload failed: " + e.getLocalizedMessage(), null));
     }
 
-    private void saveToFirestore(String id, String title, String author, String price, String desc, String cover, String pdf) {
+    private void handleUploadError(String message, StorageReference pdfToCleanup) {
+        if (pdfToCleanup != null) {
+            pdfToCleanup.delete();
+        }
+        progressBar.setVisibility(View.GONE);
+        uploadBtn.setEnabled(true);
+        Toast.makeText(UploadActivity.this, message, Toast.LENGTH_LONG).show();
+    }
+
+    private void saveToFirestore(String id, String title, String author, String price, String desc, String cover, String pdf, String storagePath, long fileSize, String uid) {
         Map<String, Object> book = new HashMap<>();
         book.put("title", title);
         book.put("author", author);
@@ -125,13 +143,28 @@ public class UploadActivity extends AppCompatActivity {
         book.put("description", desc);
         book.put("coverUrl", cover);
         book.put("pdfUrl", pdf);
-        book.put("writerId", mAuth.getCurrentUser().getUid());
+        book.put("storagePath", storagePath);
+        book.put("fileSize", fileSize);
+        book.put("mimeType", "application/pdf");
+        book.put("uploadedBy", uid);
+        book.put("uploadedAt", new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US).format(new java.util.Date()));
+        book.put("writerId", uid);
+        book.put("status", "published");
+        book.put("isApproved", true);
+        book.put("updatedAt", new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US).format(new java.util.Date()));
 
         db.collection("books").document(id).set(book)
             .addOnSuccessListener(aVoid -> {
                 progressBar.setVisibility(View.GONE);
-                Toast.makeText(UploadActivity.this, "Book Uploaded!", Toast.LENGTH_LONG).show();
+                Toast.makeText(UploadActivity.this, "Book successfully published to Books-Africa!", Toast.LENGTH_LONG).show();
                 finish();
+            })
+            .addOnFailureListener(e -> {
+                // Cleanup orphaned file on Firestore failure
+                storageRef.child(storagePath).delete();
+                progressBar.setVisibility(View.GONE);
+                uploadBtn.setEnabled(true);
+                Toast.makeText(UploadActivity.this, "Database write failed: " + e.getLocalizedMessage(), Toast.LENGTH_LONG).show();
             });
     }
 }

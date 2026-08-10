@@ -26,22 +26,6 @@ export default function Profile({ user, role }: { user: User; role: string | nul
 
   useEffect(() => {
     const fetchUserData = async () => {
-      const sandboxUserStr = localStorage.getItem('sandbox_user');
-      if (sandboxUserStr) {
-        try {
-          const parsed = JSON.parse(sandboxUserStr);
-          setUserMetadata(parsed);
-          setName(parsed.name || '');
-          setUsername(parsed.username || '');
-          setPenName(parsed.penName || '');
-          setBio(parsed.bio || '');
-          if (parsed.photoUrl) {
-            setPhotoUrl(parsed.photoUrl);
-            setPhotoPreview(parsed.photoUrl);
-          }
-          return;
-        } catch (e) {}
-      }
       const path = `users/${user.uid}`;
       try {
         const userDoc = await getDoc(doc(db, 'users', user.uid));
@@ -86,24 +70,6 @@ export default function Profile({ user, role }: { user: User; role: string | nul
 
     const path = `users/${user.uid}`;
     try {
-      const sandboxUserStr = localStorage.getItem('sandbox_user');
-      if (sandboxUserStr) {
-        const parsed = JSON.parse(sandboxUserStr);
-        const updatedSandboxUser = {
-          ...parsed,
-          name,
-          username,
-          penName: penName || '',
-          bio,
-          photoUrl: photoPreview || photoUrl
-        };
-        localStorage.setItem('sandbox_user', JSON.stringify(updatedSandboxUser));
-        setUserMetadata(updatedSandboxUser);
-        toast.success('Profile credentials synchronized successfully! (Sandbox Mode)');
-        setLoading(false);
-        return;
-      }
-
       let finalPhotoUrl = photoUrl;
 
       if (newPhoto) {
@@ -193,25 +159,6 @@ export default function Profile({ user, role }: { user: User; role: string | nul
 
   const handleBecomeWriter = async () => {
     setIsApplying(true);
-    const sandboxUserStr = localStorage.getItem('sandbox_user');
-    if (sandboxUserStr) {
-      try {
-        const parsed = JSON.parse(sandboxUserStr);
-        const updatedSandboxUser = {
-          ...parsed,
-          role: 'writer',
-          hasAppliedAsWriter: true
-        };
-        localStorage.setItem('sandbox_user', JSON.stringify(updatedSandboxUser));
-        toast.success('Welcome to the Author Guild! Your account is now a Writer account. (Sandbox Mode)');
-        setTimeout(() => {
-          window.location.reload();
-        }, 1500);
-      } catch (e) {}
-      setIsApplying(false);
-      return;
-    }
-
     const path = `users/${user.uid}`;
     try {
       await updateDoc(doc(db, 'users', user.uid), {
@@ -233,24 +180,6 @@ export default function Profile({ user, role }: { user: User; role: string | nul
 
   const handleBecomeReader = async () => {
     setIsApplying(true);
-    const sandboxUserStr = localStorage.getItem('sandbox_user');
-    if (sandboxUserStr) {
-      try {
-        const parsed = JSON.parse(sandboxUserStr);
-        const updatedSandboxUser = {
-          ...parsed,
-          role: 'customer'
-        };
-        localStorage.setItem('sandbox_user', JSON.stringify(updatedSandboxUser));
-        toast.success('Account switched back to Reader mode. (Sandbox Mode)');
-        setTimeout(() => {
-          window.location.reload();
-        }, 1500);
-      } catch (e) {}
-      setIsApplying(false);
-      return;
-    }
-
     const path = `users/${user.uid}`;
     try {
       await updateDoc(doc(db, 'users', user.uid), {

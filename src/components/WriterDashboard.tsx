@@ -31,7 +31,6 @@ export default function WriterDashboard() {
   const navigate = useNavigate();
 
   const handleLogout = async () => {
-    localStorage.removeItem('sandbox_user');
     await auth.signOut();
     navigate('/login');
   };

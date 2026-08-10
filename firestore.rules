@@ -78,6 +78,11 @@ service cloud.firestore {
              (!data.keys().contains('description') || data.description == null || data.description is string) &&
              (!data.keys().contains('coverUrl') || data.coverUrl == null || data.coverUrl is string) &&
              (!data.keys().contains('pdfUrl') || data.pdfUrl == null || data.pdfUrl is string) &&
+             (!data.keys().contains('storagePath') || data.storagePath == null || data.storagePath is string) &&
+             (!data.keys().contains('fileSize') || data.fileSize is number) &&
+             (!data.keys().contains('mimeType') || data.mimeType == null || data.mimeType is string) &&
+             (!data.keys().contains('uploadedBy') || data.uploadedBy == null || data.uploadedBy is string) &&
+             (!data.keys().contains('uploadedAt') || data.uploadedAt == null || data.uploadedAt is string) &&
              (!data.keys().contains('ratingAverage') || data.ratingAverage is number) &&
              (!data.keys().contains('ratingCount') || data.ratingCount is number) &&
              (!data.keys().contains('isApproved') || data.isApproved is bool) &&
@@ -97,6 +102,11 @@ service cloud.firestore {
              (!data.keys().contains('description') || data.description == null || data.description is string) &&
              (!data.keys().contains('coverUrl') || data.coverUrl == null || data.coverUrl is string) &&
              (!data.keys().contains('pdfUrl') || data.pdfUrl == null || data.pdfUrl is string) &&
+             (!data.keys().contains('storagePath') || data.storagePath == null || data.storagePath is string) &&
+             (!data.keys().contains('fileSize') || data.fileSize is number) &&
+             (!data.keys().contains('mimeType') || data.mimeType == null || data.mimeType is string) &&
+             (!data.keys().contains('uploadedBy') || data.uploadedBy == null || data.uploadedBy is string) &&
+             (!data.keys().contains('uploadedAt') || data.uploadedAt == null || data.uploadedAt is string) &&
              (!data.keys().contains('ratingAverage') || data.ratingAverage is number) &&
              (!data.keys().contains('ratingCount') || data.ratingCount is number) &&
              (!data.keys().contains('isApproved') || data.isApproved is bool) &&

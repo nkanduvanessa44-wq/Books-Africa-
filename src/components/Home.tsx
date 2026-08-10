@@ -145,14 +145,8 @@ export default function Home({ user, role }: { user: User; role: string | null }
   };
 
   useEffect(() => {
-    const sandboxUserStr = localStorage.getItem('sandbox_user');
     let unsubscribeUser = () => {};
-    if (sandboxUserStr) {
-      try {
-        const parsed = JSON.parse(sandboxUserStr);
-        setUserMetadata(parsed);
-      } catch (e) {}
-    } else {
+    if (user?.uid) {
       const userRef = doc(db, 'users', user.uid);
       unsubscribeUser = onSnapshot(userRef, (snapshot) => {
         if (snapshot.exists()) {

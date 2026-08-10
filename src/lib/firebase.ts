@@ -9,31 +9,7 @@ export const auth = getAuth(app);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const storage = getStorage(app);
 
-// --- Sandbox Auth Bypass Utility ---
-export function getSandboxUser() {
-  const sandboxUserStr = typeof window !== 'undefined' ? localStorage.getItem('sandbox_user') : null;
-  if (sandboxUserStr) {
-    try {
-      return JSON.parse(sandboxUserStr);
-    } catch (e) {
-      return null;
-    }
-  }
-  return null;
-}
-
 export function getCurrentUser() {
-  const sandbox = getSandboxUser();
-  if (sandbox) {
-    return {
-      uid: sandbox.uid,
-      email: sandbox.email,
-      displayName: sandbox.name,
-      emailVerified: true,
-      isAnonymous: false,
-      providerData: [{ providerId: 'google.com', uid: sandbox.uid, displayName: sandbox.name, email: sandbox.email }]
-    } as any;
-  }
   return auth.currentUser;
 }
 

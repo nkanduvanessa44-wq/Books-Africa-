@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { ref, uploadBytes, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
+import { ref, uploadBytes, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 import { addDoc, collection, doc, getDoc, updateDoc } from 'firebase/firestore';
 import { ArrowLeft, Upload as UploadIcon, Image as ImageIcon, FileText, Plus, ShieldCheck, Loader2, Scissors, Check, X, Save, Sparkles, Wand2, RefreshCw } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -144,18 +144,6 @@ export default function Upload() {
     const currentUser = getCurrentUser();
     if (!currentUser) return;
     const fetchMeta = async () => {
-      const sandboxUserStr = localStorage.getItem('sandbox_user');
-      if (sandboxUserStr) {
-        try {
-          const parsed = JSON.parse(sandboxUserStr);
-          setUserMetadata(parsed);
-          if (!editingId) {
-            if (parsed.penName) setAuthor(parsed.penName);
-            else if (parsed.name) setAuthor(parsed.name);
-          }
-          return;
-        } catch (e) {}
-      }
       try {
         const snap = await getDoc(doc(db, 'users', currentUser.uid));
         if (snap.exists()) {
@@ -232,8 +220,16 @@ export default function Upload() {
       return;
     }
 
-    if (!currentUser.emailVerified && currentUser.providerData[0]?.providerId === 'password') {
-      toast.info('Security Notice: Continuing without email verification for sandbox convenience.');
+    if (pdf) {
+      const isPdf = pdf.name.toLowerCase().endsWith('.pdf') || pdf.type === 'application/pdf';
+      if (!isPdf) {
+        toast.error('Only PDF manuscripts are currently supported.');
+        return;
+      }
+      if (pdf.size > 50 * 1024 * 1024) {
+        toast.error('The selected file is larger than the 50 MB limit.');
+        return;
+      }
     }
 
     setLoading(true);
@@ -241,12 +237,16 @@ export default function Upload() {
     setUploadStatus('Synchronizing nodes...');
     toast.info(asDraft ? 'Preserving draft manuscript...' : 'Initiating global publication...');
 
+    let uploadedPdfRef: any = null;
+
     try {
       const finalCategory = category === 'Other' ? customCategory : category;
       const timestamp = Date.now();
+      const safeUid = currentUser.uid.replace(/[^a-zA-Z0-9]/g, '_');
       
       let coverUrl = existingCoverUrl;
       let pdfUrl = existingPdfUrl;
+      let manuscriptStoragePath = `books/${safeUid}_${timestamp}_manuscript.pdf`;
 
       const progressState = { cover: cover ? 0 : 100, pdf: pdf ? 0 : 100 };
       const totalToUploadSize = (cover ? cover.size : 0) + (pdf ? pdf.size : 0);
@@ -257,25 +257,23 @@ export default function Upload() {
           let progressTimer: any = null;
 
           const uploadTask = uploadBytesResumable(storageRef, file, {
-            contentType: file.type
+            contentType: file.type || (key === 'pdf' ? 'application/pdf' : 'image/jpeg')
           });
 
-          // Connection timeout: abort if no progress at all in first 30 seconds
           const connectionTimer = setTimeout(() => {
             if (lastBytesTransferred === 0) {
               console.warn(`[Storage] Connection timeout for ${key} - zero progress within 30s.`);
               uploadTask.cancel();
-              reject(new Error('Connection timeout'));
+              reject(new Error('Upload connection timed out. Please check your network connection and retry.'));
             }
           }, 30000);
 
-          // Stalled progress timeout: abort if progress stops for more than 60 seconds
           const resetProgressTimer = () => {
             if (progressTimer) clearTimeout(progressTimer);
             progressTimer = setTimeout(() => {
               console.warn(`[Storage] Progress stalled for ${key}.`);
               uploadTask.cancel();
-              reject(new Error('Stalled progress'));
+              reject(new Error('Upload progress stalled. Please retry.'));
             }, 60000);
           };
 
@@ -317,95 +315,38 @@ export default function Upload() {
       };
 
       const uploadWithProgressAndRetry = async (storageRef: any, file: File, key: 'cover' | 'pdf', maxRetries = 3) => {
-        const isSandbox = !!localStorage.getItem('sandbox_user');
-        if (isSandbox) {
-          console.warn(`[Storage] Sandbox Mode detected. Bypassing Firebase Storage upload for ${key} to use instant local database fallback.`);
-          throw new Error('Sandbox storage bypass');
-        }
-
-        const isDev = window.location.hostname.includes('run.app') || window.location.hostname === 'localhost';
-        const finalMaxRetries = isDev ? 1 : maxRetries;
-
         let attempt = 0;
-        while (attempt < finalMaxRetries) {
+        while (attempt < maxRetries) {
           try {
             const url = await uploadWithProgress(storageRef, file, key);
             return url;
           } catch (err) {
             attempt++;
             console.warn(`[Storage] Upload attempt ${attempt} failed for ${key}. Retrying...`, err);
-            if (attempt >= finalMaxRetries) {
+            if (attempt >= maxRetries) {
               throw err;
             }
             await new Promise((res) => setTimeout(res, 1500));
           }
         }
-        throw new Error(`Failed to upload ${key} after ${finalMaxRetries} attempts.`);
+        throw new Error(`Failed to upload ${key} after ${maxRetries} attempts.`);
       };
 
       if (cover) {
         try {
-          const coverRef = ref(storage, `covers/${timestamp}-${cover.name}`);
+          const coverRef = ref(storage, `covers/${safeUid}_${timestamp}_cover.jpg`);
           coverUrl = await uploadWithProgressAndRetry(coverRef, cover, 'cover');
-        } catch (storageErr) {
-          console.warn("Firebase Storage unavailable for cover, using fallback logic...", storageErr);
+        } catch (storageErr: any) {
+          console.warn("Firebase Storage unavailable for cover, compressing as embedded asset...", storageErr);
           setUploadStatus('Optimizing cover as database asset...');
           coverUrl = await compressImage(cover);
         }
       }
 
       if (pdf) {
-        try {
-          const pdfRef = ref(storage, `books/${timestamp}-${pdf.name}`);
-          pdfUrl = await uploadWithProgressAndRetry(pdfRef, pdf, 'pdf');
-        } catch (storageErr) {
-          console.warn("Firebase Storage unavailable for manuscript, using fallback logic...", storageErr);
-          setUploadStatus('Processing manuscript document...');
-          const isWordDoc = pdf.name.toLowerCase().endsWith('.doc') || pdf.name.toLowerCase().endsWith('.docx');
-          
-          if (isWordDoc) {
-            try {
-              const textContent = await pdf.text();
-              const cleanLines = textContent
-                .replace(/[^\x20-\x7E\n\r\t]/g, ' ')
-                .split(/\n+/)
-                .map(line => line.trim())
-                .filter(line => line.length > 3);
-
-              const docTitle = pdf.name.replace(/\.[^/.]+$/, "");
-              const htmlDoc = `<!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <title>${docTitle}</title>
-    <style>
-      body { font-family: 'Georgia', 'Times New Roman', serif; line-height: 1.8; padding: 48px 32px; background: #FAF9F5; color: #2A2A2A; max-width: 800px; margin: 0 auto; }
-      h1 { text-align: center; font-size: 28px; margin-bottom: 24px; font-weight: 900; border-bottom: 2px solid #E5E3D8; padding-bottom: 16px; color: #111; }
-      p { text-indent: 2em; margin-bottom: 1.2em; text-align: justify; font-size: 18px; color: #333; }
-      .meta { text-align: center; font-size: 11px; color: #888; font-family: sans-serif; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 32px; }
-    </style>
-  </head>
-  <body>
-    <div class="meta">Manuscript Document (${pdf.name})</div>
-    <h1>${title || docTitle}</h1>
-    ${cleanLines.length > 0 
-      ? cleanLines.map(l => `<p>${l}</p>`).join('') 
-      : `<p>Manuscript text content loaded successfully from ${pdf.name}.</p>`}
-  </body>
-</html>`;
-              pdfUrl = 'data:text/html;charset=utf-8,' + encodeURIComponent(htmlDoc);
-            } catch (err) {
-              pdfUrl = await readFileAsDataURL(pdf);
-            }
-          } else if (pdf.size < 800 * 1024) {
-            pdfUrl = await readFileAsDataURL(pdf);
-          } else {
-            const localKey = `offline_pdf_${timestamp}`;
-            const pdfBase64 = await readFileAsDataURL(pdf);
-            await set(localKey, pdfBase64);
-            pdfUrl = `https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf#local_ref=${localKey}`;
-          }
-        }
+        const pdfRef = ref(storage, manuscriptStoragePath);
+        pdfUrl = await uploadWithProgressAndRetry(pdfRef, pdf, 'pdf');
+        uploadedPdfRef = pdfRef;
       }
 
       setUploadStatus('Writing to decentralized ledger...');
@@ -419,7 +360,12 @@ export default function Upload() {
         ageRating,
         coverUrl,
         pdfUrl,
-        writerId: getCurrentUser().uid,
+        storagePath: manuscriptStoragePath,
+        fileSize: pdf ? pdf.size : 0,
+        mimeType: 'application/pdf',
+        uploadedBy: currentUser.uid,
+        uploadedAt: new Date().toISOString(),
+        writerId: currentUser.uid,
         updatedAt: new Date().toISOString(),
         isApproved: false, 
         status: asDraft ? 'draft' : 'published',
@@ -441,12 +387,21 @@ export default function Upload() {
 
         toast.success(asDraft ? 'Draft manuscript preserved in your workspace.' : 'Manuscript broadcasted to the archives!');
         navigate('/writer-dashboard');
-      } catch (err) {
+      } catch (err: any) {
+        // Clean up orphaned Storage PDF if Firestore write failed
+        if (uploadedPdfRef) {
+          try {
+            await deleteObject(uploadedPdfRef);
+            console.info("Orphaned Storage manuscript file cleaned up following Firestore error.");
+          } catch (cleanupErr) {
+            console.warn("Could not clean up orphaned file:", cleanupErr);
+          }
+        }
         handleFirestoreError(err, editingId ? OperationType.UPDATE : OperationType.CREATE, 'books');
       }
     } catch (err: any) {
       console.error(err);
-      toast.error('Transmission failure: ' + err.message);
+      toast.error('Upload failed: ' + (err.message || 'Check your network connection and retry.'));
     } finally {
       setLoading(false);
       setUploadProgress(0);
@@ -771,11 +726,11 @@ export default function Upload() {
                 <FileText className="w-8 h-8" />
               </div>
               <div>
-                <p className="text-sm font-black truncate max-w-[200px] text-natural-text">{pdf ? pdf.name : 'Select Manuscript'}</p>
+                <p className="text-sm font-black truncate max-w-[200px] text-natural-text">{pdf ? pdf.name : 'Select Manuscript (PDF)'}</p>
                 <p className="text-[10px] text-accent tracking-widest font-bold mt-1 uppercase">
                   {pdf 
-                    ? (pdf.size / 1024 / 1024).toFixed(2) + ' MB (' + (pdf.name.toLowerCase().endsWith('.pdf') ? 'PDF' : 'Word Document') + ')' 
-                    : 'PDF or Word (.doc / .docx)'}
+                    ? (pdf.size / 1024 / 1024).toFixed(2) + ' MB (PDF Document)' 
+                    : 'PDF Document (Max 50 MB)'}
                 </p>
               </div>
             </div>
@@ -783,15 +738,19 @@ export default function Upload() {
               <Plus className="w-8 h-8" />
               <input 
                 type="file" 
-                accept="application/pdf, .doc, .docx, application/msword, application/vnd.openxmlformats-officedocument.wordprocessingml.document" 
+                accept="application/pdf, .pdf" 
                 className="hidden"
                 onChange={(e) => {
                   const file = e.target.files?.[0] || null;
                   if (file) {
                     const ext = file.name.toLowerCase();
-                    const isValid = ext.endsWith('.pdf') || ext.endsWith('.doc') || ext.endsWith('.docx') || file.type.includes('pdf') || file.type.includes('word') || file.type.includes('officedocument');
-                    if (!isValid) {
-                      toast.error('Validation Check: Only PDF (.pdf) and Word (.doc, .docx) documents are allowed.');
+                    const isPdf = ext.endsWith('.pdf') || file.type === 'application/pdf';
+                    if (!isPdf) {
+                      toast.error('Only PDF manuscripts (.pdf) are supported.');
+                      return;
+                    }
+                    if (file.size > 50 * 1024 * 1024) {
+                      toast.error('The selected file exceeds the 50 MB maximum size limit.');
                       return;
                     }
                     setPdf(file);
